@@ -2721,6 +2721,22 @@ function typeCompare(days, group) {
         h('td', { class: 'n', title: r.tried ? `${num(mine[r.k])} of ${plural(r.tried, 'map')}` : null }, r.rate != null ? pct(r.rate) : none())))))));
 }
 
+// Your counted plays on Rhythia (near.rs my_top), best RP first; null while unknown.
+let myTop = null;
+const loadMyTop = () => invoke('my_top').then(t => { myTop = t; }).catch(() => {});
+// Rhythia's total RP: your 99 best plays, the n-th counts RP × 0.97^(n−1) (to the cent on players' profiles).
+const COUNTED_PLAYS = 99;
+const weighted = rps => rps.slice(0, COUNTED_PLAYS).reduce((s, p, i) => s + p * 0.97 ** i, 0);
+// What a play of `rp` on the map would add to your total RP: it replaces your best there if higher.
+function totalGain(m, rp) {
+  if (!myTop || !(rp > 0)) return null;
+  const old = myTop.find(t => (m.hash && t.hash === m.hash) || (m.legacyId && t.song === m.legacyId));
+  if (old && old.rp >= rp) return 0;
+  const rps = myTop.map(t => t.rp);
+  const after = myTop.filter(t => t !== old).map(t => t.rp).concat(rp).sort((a, b) => b - a);
+  return weighted(after) - weighted(rps);
+}
+
 // Maps worth another go, each with why.
 function toImprove(bests) {
   const byId = new Map(bests.map(b => [b.id, b]));
@@ -2754,8 +2770,8 @@ function toImprove(bests) {
       const at = b.at && new Date(b.at.replace(' ', 'T') + 'Z').getTime();
       if (isRanked(m) && at && now - at > 180 * DAY_MS) why.push('old');
     }
-    // RP over your best at the best bet's speed, as the map's At which speed says it.
-    const gain = check?.bet?.rp ? Math.round(check.bet.rp[1] - (check.best ?? 0)) : null;
+    // What the best bet's RP would add to your total RP.
+    const gain = totalGain(m, check?.bet?.rp?.[1]);
     if (why.length) out.push({ ...m, why, check, gain: gain > 0 ? gain : null, bestMisses: b?.misses ?? null, bestSpeed: b?.speed ?? null });
   }
   return out.sort((a, b) => b.why.length - a.why.length || (b.stars ?? 0) - (a.stars ?? 0));
@@ -2769,6 +2785,7 @@ async function viewGame(root) {
   try { await getLibrary(true); pic = await invoke('game_picture'); } catch (e) { fill(body, empty('Could not read your game', String(e))); return; }
   loadNearGroup().then(g => { drawImprove(); drawCompare(); loadKinds(g.plays.map(p => p.map).filter(Boolean), drawCompare); }).catch(() => {});
   loadForYou(lib.maps.filter(m => m.plays && m.onlineId)).then(() => drawImprove());
+  loadMyTop().then(() => drawImprove());
 
   const today = isoDay(Date.now());
   const within = n => pic.days.filter(d => utcDay(d.day) > utcDay(today) - n * DAY_MS);
@@ -2796,7 +2813,7 @@ async function viewGame(root) {
     { label: 'Accuracy', sort: 'bestAccuracy', cls: 'n', cell: m => acc(m.bestAccuracy) },
     { label: 'Misses', sort: 'bestMisses', cls: 'n', cell: m => (m.bestMisses == null ? none() : num(m.bestMisses)) },
     { label: 'Try at', cls: 'n', cell: m => betText(m.check) },
-    { label: 'Gain', sort: 'gain', cls: 'n', cell: m => (m.gain == null ? none() : `+${num(m.gain)}`) },
+    { label: 'Gain', sort: 'gain', cls: 'n', cell: m => (m.gain == null ? none() : `+${m.gain < 10 ? m.gain.toFixed(1) : num(Math.round(m.gain))}`) },
     { label: 'Why', sort: 'why', cls: 'why', cell: m => m.why.map(w => WHY[w]).join(' · ') },
   ];
   const GAME_SORTS = [['why', 'Most reasons'], ['gain', 'RP gain'], ['stars', 'Stars'], ['bestRp', 'Best RP'], ['bestAccuracy', 'Accuracy'],

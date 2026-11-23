@@ -257,6 +257,7 @@ struct ScoresAnswer {
 #[serde(rename_all = "camelCase")]
 struct RawTop {
     song_id: Option<String>,
+    beatmap_hash: Option<String>,
     beatmap_title: Option<String>,
     #[serde(rename = "awarded_sp")]
     awarded_sp: Option<f64>,
@@ -387,9 +388,62 @@ fn accuracy(misses: Option<i64>, notes: Option<i64>) -> Option<f64> {
     (m <= n).then(|| 100.0 * (n - m) as f64 / n as f64)
 }
 
+/// One map in the player's counted plays on Rhythia: its best RP, by song key and map hash.
+#[derive(Serialize, Debug, PartialEq)]
+pub struct TopPlay {
+    pub rp: f64,
+    pub song: Option<String>,
+    pub hash: Option<String>,
+}
+
+/// The player's best plays on Rhythia (`getUserScores` top, at most 100; Rhythia's total RP is the 99 best,
+/// the n-th ×0.97^(n−1)), the best per map first. Public data; nothing goes out but the player's number.
+pub async fn my_top(net: &Net, id: i64) -> Result<Vec<TopPlay>, String> {
+    let query = ScoresQuery { session: "", id, limit: 100 };
+    let answer: ScoresAnswer = net.post_json(Host::RhythiaApi, "/api/getUserScores", &query, &[]).await?;
+    Ok(top_plays(answer.top))
+}
+
+fn top_plays(raw: Vec<RawTop>) -> Vec<TopPlay> {
+    let mut out: Vec<TopPlay> = Vec::new();
+    for t in raw.into_iter().take(100).filter(|t| t.passed != Some(false)) {
+        let Some(rp) = t.awarded_sp.filter(|r| r.is_finite() && (0.0..=100_000.0).contains(r)) else { continue };
+        let song = t.song_id.filter(|s| song_ok(s));
+        let hash = t.beatmap_hash.map(|h| h.to_ascii_lowercase()).filter(|h| crate::library::is_hash(h));
+        if song.is_none() && hash.is_none() {
+            continue;
+        }
+        let same = |p: &TopPlay| (song.is_some() && p.song == song) || (hash.is_some() && p.hash == hash);
+        match out.iter_mut().find(|p| same(p)) {
+            Some(p) if p.rp >= rp => {}
+            Some(p) => p.rp = rp,
+            None => out.push(TopPlay { rp, song, hash }),
+        }
+    }
+    out.sort_by(|a, b| b.rp.total_cmp(&a.rp));
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn top_plays_best_per_map_sorted() {
+        let raw: Vec<RawTop> = serde_json::from_value(serde_json::json!([
+            {"songId": "a", "beatmapHash": "AB".repeat(32), "awarded_sp": 200.0},
+            {"songId": "b", "awarded_sp": 300.0},
+            {"songId": "a", "awarded_sp": 250.0},
+            {"songId": "c", "awarded_sp": 999.0, "passed": false},
+            {"songId": "", "awarded_sp": 50.0},
+            {"songId": "d", "awarded_sp": f64::NAN}
+        ]))
+        .unwrap();
+        let top = top_plays(raw);
+        assert_eq!(top.len(), 2);
+        assert_eq!((top[0].rp, top[0].song.as_deref()), (300.0, Some("b")));
+        assert_eq!((top[1].rp, top[1].hash.as_deref()), (250.0, Some("ab".repeat(32).as_str())));
+    }
 
     #[test]
     fn song_keys_and_numbers() {

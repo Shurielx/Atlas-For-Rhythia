@@ -381,7 +381,7 @@ th.why,td.why{text-align:left;color:var(--dim);font-size:.85rem}
 @media (min-width:1100px){.game-grid{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}}
 .game-grid .tbl table td:first-child:not(.n):not(.c-map),.game-grid .tbl table th:first-child:not(.n):not(.c-map){text-align:left}
 .key::before{content:"";display:inline-block;width:.6rem;height:.6rem;margin-right:.5rem;background:var(--c)}
-td.why{white-space:normal;min-width:16rem}
+td.why{white-space:normal;min-width:11rem}
 .type-bar{display:flex;height:.8rem;background:var(--blank)}
 .type-bar i{display:block}
 .type-bar .k-jump{background:var(--jump)}.type-bar .k-stream{background:var(--stream)}.type-bar .k-tech{background:var(--tech)}.type-bar .k-varied{background:var(--varied)}.type-bar .k-none{background:var(--blank)}

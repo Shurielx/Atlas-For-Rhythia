@@ -395,6 +395,15 @@ async fn my_rank(state: State<'_, Atlas>) -> Result<Option<rhythia::Rank>, Strin
     }
 }
 
+/// The player's best plays on Rhythia (near.rs `my_top`), none when Atlas does not know their account.
+#[tauri::command]
+async fn my_top(state: State<'_, Atlas>) -> Result<Option<Vec<near::TopPlay>>, String> {
+    match me(&state) {
+        Some(id) => near::my_top(&state.net, id).await.map(Some),
+        None => Ok(None),
+    }
+}
+
 #[tauri::command]
 async fn game_collections() -> Result<Vec<library::GameCollection>, String> {
     blocking(|| library::game_collections(&database()?)).await
@@ -1117,6 +1126,7 @@ pub fn run() {
             drag_saved_maps,
             top_players,
             my_rank,
+            my_top,
             game_picture,
             map_preview,
             rhythia_sign_in_reimagined,

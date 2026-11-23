@@ -276,6 +276,8 @@ function cover(m, cls = '') {
 
 // ---------- shared data ----------
 
+// Your whole tries of each map at each speed, from the game (speed_tries): Rhythia id -> [{speed, tries, passes}].
+let myTries = new Map();
 async function getLibrary(force) {
   if (lib && !force) return lib;
   const got = await invoke('library');
@@ -287,6 +289,11 @@ async function getLibrary(force) {
     if (m.hash) byHash.set(m.hash, m);
   }
   lib = { ...got, byOnline, byHash };
+  myTries = new Map();
+  for (const t of await invoke('speed_tries').catch(() => [])) {
+    if (!myTries.has(t.id)) myTries.set(t.id, []);
+    myTries.get(t.id).push(t);
+  }
   return lib;
 }
 
@@ -662,9 +669,31 @@ function readCheck(speeds, g, m) {
       acc: notes ? misses.map(x => 100 * (1 - x / notes)).reverse() : null };
   });
   // Your best as Rhythia scored it (the game's own RP can differ: it works out the stars itself).
-  return { rows, bet: g.bet >= 0 ? rows[g.bet] : null, best: g.best ?? inGame(m)?.bestRp ?? m.bestRp ?? null };
+  return { rows, best: g.best ?? inGame(m)?.bestRp ?? m.bestRp ?? null };
 }
-const speedCheck = m => forYouKept.get(keyOfMap(m))?.check ?? null;
+// The server knows only your passes on Rhythia, not your fails. Your tries of the map in the game move its chance:
+// a pass at a speed or faster counts as a pass, a fail at a speed or slower as a fail, and the server's chance
+// counts as OWN_WEIGHT tries.
+const OWN_WEIGHT = 3;
+const LIKELY = CHANCE[0][0];
+// The best bet: the most RP over your best at a speed you likely pass (in 5 tries); without RP the fastest such speed.
+function realistic(c, m) {
+  if (!c) return null;
+  const id = m.onlineId || inGame(m)?.onlineId;
+  const own = (id && myTries.get(id)) || [];
+  const sum = (list, f) => list.reduce((n, t) => n + f(t), 0);
+  const rows = !own.length ? c.rows : c.rows.map(r => {
+    const passes = sum(own.filter(t => t.speed >= r.speed - 0.01), t => t.passes);
+    const fails = sum(own.filter(t => t.speed <= r.speed + 0.01), t => t.tries - t.passes);
+    return { ...r, chance: (OWN_WEIGHT * r.chance + passes) / (OWN_WEIGHT + passes + fails) };
+  });
+  const likely = rows.filter(r => in5(r.chance) >= LIKELY);
+  const bet = rows.some(r => r.rp)
+    ? likely.filter(r => r.rp && r.rp[1] > (c.best ?? 0)).sort((a, b) => b.rp[1] - a.rp[1])[0] ?? null
+    : likely.at(-1) ?? null;
+  return { ...c, rows, bet, likely: likely.length > 0 };
+}
+const speedCheck = m => realistic(forYouKept.get(keyOfMap(m))?.check ?? null, m);
 // "1.25× · 310" (speed and RP around it) for lists.
 function betText(s) {
   const b = s?.bet;
@@ -687,7 +716,7 @@ function speedPart(m) {
       h('h3', {}, 'At which speed'),
       b ? h('p', {}, h('b', {}, `Best bet: ${b.speed.toFixed(2)}×`), ` · ${chanceOf(b.chance)[1].toLowerCase()} to pass, ${triesText(b.chance)}`,
         b.rp && ` · around ${num(b.rp[1])} RP`, b.rp && s.best != null && b.rp[1] > s.best && h('span', { class: 'pass' }, ` (+${num(Math.round(b.rp[1] - s.best))} over your best)`))
-        : h('p', {}, 'Too hard at every speed for now.'),
+        : h('p', {}, c.likely ? 'No speed you likely pass beats your best yet.' : 'Too hard at every speed for now.'),
       h('div', { class: 'tbl' }, h('table', { class: 'speeds' },
         h('thead', {}, h('tr', {}, ['Speed', 'Pass', 'Accuracy', 'Misses', 'RP', 'You here'].map((x, i) => h('th', { class: i === 1 ? '' : 'n' }, x)))),
         h('tbody', {}, rows.map(r => {

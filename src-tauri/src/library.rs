@@ -352,6 +352,55 @@ pub fn days(db: &Path) -> Result<Vec<DayPlays>, String> {
     Ok(rows)
 }
 
+/// Whole tries and passes of one map at one speed.
+#[derive(Serialize, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct SpeedTries {
+    /// The map's id on Rhythia.
+    pub id: i64,
+    pub speed: f64,
+    pub tries: i64,
+    pub passes: i64,
+}
+
+/// Every map's tries and passes at each speed (two decimals): only whole tries (no practice from the middle, no
+/// spin), and a pass with No Fail is a try, not a pass.
+pub fn speed_tries(db: &Path) -> Result<Vec<SpeedTries>, String> {
+    let c = open(db)?;
+    let scores = columns(&c, "Scores");
+    if !["MapId", "Passed", "Speed"].iter().all(|n| scores.contains(*n)) {
+        return Ok(Vec::new());
+    }
+    let mut whole = String::new();
+    if scores.contains("StartFrom") {
+        whole.push_str(" AND COALESCE(StartFrom, 0) = 0");
+    }
+    if scores.contains("Spin") {
+        whole.push_str(" AND COALESCE(Spin, 0) = 0");
+    }
+    let passed = if scores.contains("Mods") { "Passed = 1 AND COALESCE(Mods, '') NOT LIKE '%nofail%'" } else { "Passed = 1" };
+    let sql = format!(
+        "SELECT MapId, round(Speed, 2) s, COUNT(*), SUM({passed}) FROM Scores \
+         WHERE MapId > 0 AND Speed > 0{whole} GROUP BY MapId, s LIMIT {MAX_MAPS}"
+    );
+    let busy = |_| "The game's database is busy. Try again in a moment.".to_string();
+    let mut stmt = c.prepare(&sql).map_err(busy)?;
+    let rows = stmt
+        .query_map([], |r| {
+            Ok(int(r, 0).filter(|n| *n > 0).zip(real(r, 1).filter(|s| (0.1..=10.0).contains(s))).map(|(id, speed)| SpeedTries {
+                id,
+                speed,
+                tries: int(r, 2).unwrap_or(0).max(0),
+                passes: int(r, 3).unwrap_or(0).max(0),
+            }))
+        })
+        .map_err(busy)?
+        .flatten()
+        .flatten()
+        .collect();
+    Ok(rows)
+}
+
 /// Tries and passes since `secs` (Unix seconds; the game writes `CreatedAt` in UTC).
 pub fn tries_since(db: &Path, secs: u64) -> Result<(i64, i64), String> {
     let c = open(db)?;
@@ -514,6 +563,13 @@ mod tests {
         assert_eq!(got.iter().map(|b| b.id).collect::<Vec<_>>(), vec![10, 20], "fails, spin and other players left out");
         assert_eq!((got[0].rp, got[0].passes), (Some(320.0), 2), "best whole pass; practice from the middle does not count");
         assert_eq!((got[1].accuracy, got[1].mods.clone(), got[1].status.as_deref()), (Some(95.0), vec!["mod_nofail".to_string()], Some("UNRANKED")));
+        let mut speeds = speed_tries(&db).unwrap();
+        speeds.sort_by(|a, b| (a.id, a.speed).partial_cmp(&(b.id, b.speed)).unwrap());
+        assert_eq!(
+            speeds.iter().map(|s| (s.id, s.speed, s.tries, s.passes)).collect::<Vec<_>>(),
+            vec![(10, 1.0, 3, 2), (20, 1.0, 1, 1), (20, 1.25, 1, 0)],
+            "practice from the middle and spin left out; No Fail is not a pass"
+        );
         assert_eq!(newest_try(&db).unwrap(), 7);
         assert_eq!(tries_since(&db, 1_767_312_000).unwrap(), (5, 4), "from 2026-01-02 00:00 UTC");
         let new = tries_after(&db, 5).unwrap();

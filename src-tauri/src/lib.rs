@@ -282,6 +282,12 @@ async fn map_attempts(online_id: Option<i64>, hash: Option<String>) -> Result<Ve
     blocking(move || library::attempts(&database()?, online_id, hash.as_deref())).await
 }
 
+/// Your whole tries of every map at each speed (library.rs `speed_tries`), for At which speed.
+#[tauri::command]
+async fn speed_tries() -> Result<Vec<library::SpeedTries>, String> {
+    blocking(|| library::speed_tries(&database()?)).await
+}
+
 #[tauri::command]
 async fn catalog(state: State<'_, Atlas>, query: rhythia::CatalogQuery) -> Result<rhythia::CatalogPage, String> {
     let mut result = rhythia::beatmaps(&state.net, &state.seen, &query).await?;
@@ -1088,6 +1094,7 @@ pub fn run() {
             open_data_folder,
             library,
             map_attempts,
+            speed_tries,
             catalog,
             install_maps,
             cancel_install,

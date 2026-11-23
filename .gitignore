@@ -1,0 +1,13 @@
+# local database copies and test files
+backup/
+test-import/
+# build
+node_modules/
+src-tauri/target/
+src-tauri/gen/schemas/
+# the updater signing key never goes into the repo
+*.key
+# installer packages for sharing
+share/
+# local working folders
+public-sync/

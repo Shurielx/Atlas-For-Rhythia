@@ -1,0 +1,15 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "main",
+  "description": "The Atlas window: only Atlas' own commands, events and its own title bar (drag, minimize, maximize, close) and the window shadow after the start screen. Network, files and links are on the Rust side only.",
+  "windows": ["main"],
+  "permissions": [
+    "core:event:default",
+    "core:window:default",
+    "core:window:allow-start-dragging",
+    "core:window:allow-minimize",
+    "core:window:allow-toggle-maximize",
+    "core:window:allow-set-shadow",
+    "core:window:allow-close"
+  ]
+}

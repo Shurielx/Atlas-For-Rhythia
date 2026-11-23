@@ -1,0 +1,46 @@
+[package]
+name = "atlas-for-rhythia"
+version = "0.13.5"
+description = "Atlas for Rhythia"
+authors = ["Shuriel"]
+license = "GPL-3.0-only"
+edition = "2021"
+publish = false
+
+[lib]
+name = "atlas_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-deep-link = "2"
+tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
+tauri-plugin-opener = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["macros", "net", "sync", "time"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "gzip"] }
+rusqlite = { version = "0.37", features = ["bundled"] }
+url = "2"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
+tokio-tungstenite = { version = "0.26", default-features = false, features = ["handshake"] }
+futures-util = { version = "0.3.34", default-features = false, features = ["sink", "std"] }
+getrandom = "0.3"
+sha1_smol = "1"
+flate2 = "1"
+tauri-plugin-dialog = "2"
+tauri-plugin-updater = "2"
+drag = "2.1.1"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem", "Win32_Foundation", "Win32_Security_Credentials"] }
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true

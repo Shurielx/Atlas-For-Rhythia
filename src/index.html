@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en" class="boot">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Atlas for Rhythia</title>
+  <link rel="stylesheet" href="app.css">
+  <script type="module" src="app.js"></script>
+</head>
+<body>
+  <div id="splash" aria-hidden="true"><div class="splash-box"><svg class="splash-logo" viewBox="0 0 10 10"><path fill-rule="evenodd" d="M0 0h10v10H0zM3.125 3.125v3.75h3.75v-3.75z"/></svg></div></div>
+  <aside class="rail">
+    <div class="brand" data-tauri-drag-region>Atlas</div>
+    <nav class="menu" aria-label="Views">
+      <a href="#library" data-view="library">Library</a>
+      <a href="#game" data-view="game">Your game</a>
+      <a href="#catalog" data-view="catalog">Catalog</a>
+      <a href="#collections" data-view="collections">Collections</a>
+      <a href="#downloads" data-view="downloads">Downloads</a>
+    </nav>
+    <nav class="menu menu-end" aria-label="More">
+      <a href="#settings" data-view="settings">Settings</a>
+      <a href="#terms" data-view="terms">Terms</a>
+    </nav>
+    <div class="links">
+      <a class="bridge" id="rhythia" href="#settings" title="Rhythia account"><i></i><span>Rhythia</span><b id="rhythia-text">…</b></a>
+      <a class="bridge" id="bridge" href="#settings" title="Reimagined for Rhythia"><i></i><span>Reimagined</span><b id="bridge-text">…</b></a>
+    </div>
+    <div class="ver" id="version"></div>
+  </aside>
+
+  <div class="pane">
+    <!-- The window has no Windows title bar (tauri.conf.json "decorations": false); this strip moves it and holds its buttons. -->
+    <header class="top" data-tauri-drag-region>
+      <div class="win">
+        <button type="button" id="win-min" aria-label="Minimize" title="Minimize"><svg viewBox="0 0 10 10" aria-hidden="true"><path d="M0 5.5h10"/></svg></button>
+        <button type="button" id="win-max" aria-label="Maximize" title="Maximize"><svg viewBox="0 0 10 10" aria-hidden="true"><path class="i-max" d="M.5.5h9v9h-9z"/><path class="i-restore" d="M2.5.5h7v7M.5 2.5h7v7h-7z"/></svg></button>
+        <button type="button" id="win-close" class="close" aria-label="Close" title="Close"><svg viewBox="0 0 10 10" aria-hidden="true"><path d="M.5.5l9 9M9.5.5l-9 9"/></svg></button>
+      </div>
+    </header>
+    <main id="view" tabindex="-1"></main>
+  </div>
+
+  <div class="toast" id="toast" role="status" popover="manual"></div>
+
+  <dialog id="ask">
+    <form method="dialog">
+      <h2 id="ask-title"></h2>
+      <p id="ask-text"></p>
+      <input class="field" id="ask-input" maxlength="80" hidden>
+      <div id="ask-more"></div>
+      <div class="btns">
+        <button class="btn" value="yes" id="ask-yes">OK</button>
+        <button class="btn ghost" value="no">Cancel</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="sheet" class="sheet" aria-label="Map"></dialog>
+</body>
+</html>

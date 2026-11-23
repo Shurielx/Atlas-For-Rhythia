@@ -1,6 +1,6 @@
 [package]
 name = "atlas-for-rhythia"
-version = "0.13.5"
+version = "0.13.6"
 description = "Atlas for Rhythia"
 authors = ["Shuriel"]
 license = "GPL-3.0-only"

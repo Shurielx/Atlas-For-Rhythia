@@ -22,7 +22,7 @@ let onGame = null; // the open view's redraw when the game's database changed
 // ---------- preferences (this computer only) ----------
 
 const VIEWS_OF = { library: 'list', catalog: 'grid', collection: 'list', collections: 'grid' };
-const SORT_OF = { library: { key: 'title', dir: 'asc' }, catalog: { key: 'newest', dir: 'desc' } };
+const SORT_OF = { library: { key: 'title', dir: 'asc' }, catalog: { key: 'newest', dir: 'desc' }, game: { key: 'why', dir: 'desc' } };
 const ZOOMS = [0.9, 1, 1.1, 1.25, 1.5, 1.75, 2];
 // Maps on one page: your own lists (0: all) and lists from Rhythia (at most 50, one page of Rhythia's).
 const PER_PAGE = [10, 20, 30, 50, 100, 200, 0];
@@ -337,6 +337,9 @@ const kindOf = m => (m.hash ? kinds.get(m.hash) : null);
 const mixText = k => ['stream', 'jump', 'tech'].filter(x => k[x] != null)
   .map(x => `${KIND_NAME[x]} ${Math.round(k[x] <= 1 ? k[x] * 100 : k[x])}%`).join(' · ');
 const KIND_NAME = { jump: 'Jump', stream: 'Stream', tech: 'Tech', varied: 'Varied' };
+// The Type filter of a list ('all', a kind or 'quantum').
+const KIND_PICKS = [['all', 'Any type'], ['jump', 'Jump'], ['stream', 'Stream'], ['tech', 'Tech'], ['varied', 'Varied'], ['quantum', 'Quantum']];
+const kindIs = (m, pick) => pick === 'all' || (pick === 'quantum' ? !!kindOf(m)?.quantum : kindOf(m)?.kind === pick);
 function kindChip(m) {
   const k = kindOf(m);
   if (!k) return null;
@@ -1100,6 +1103,7 @@ const STATUS_RANK = { RANKED: 3, APPROVED: 3, QUALIFIED: 2, UNRANKED: 1 };
 const KIND_RANK = { jump: 4, stream: 3, tech: 2, varied: 1 };
 const sortValue = (m, key) => (key === 'status' ? STATUS_RANK[m.status] ?? 0
   : key === 'kind' ? KIND_RANK[kindOf(m)?.kind] ?? null
+  : key === 'why' ? m.why.length
   : key === 'title' ? (m.title || '').toLowerCase() : m[key]);
 function sortMaps(list, { key, dir }) {
   const sign = dir === 'asc' ? 1 : -1;
@@ -1151,7 +1155,7 @@ async function viewLibrary(root) {
     const outList = lib.maps.filter(m =>
       (f.status === 'all' || (f.status === 'LOCAL' ? !m.status : f.status === 'RANKED' ? isRanked(m) : m.status === f.status)) &&
       (f.played === 'all' || (f.played === 'yes' ? m.plays > 0 : m.plays === 0)) &&
-      (f.kind === 'all' || (f.kind === 'quantum' ? kindOf(m)?.quantum : kindOf(m)?.kind === f.kind)) &&
+      kindIs(m, f.kind) &&
       (!text || m.title.toLowerCase().includes(text) || m.mappers.some(p => p.toLowerCase().includes(text))));
     return sortMaps(outList, prefs.sort.library);
   }
@@ -1191,7 +1195,7 @@ async function viewLibrary(root) {
       } }),
       seg([['all', 'All'], ['yes', 'Played'], ['no', 'Not played']], f.played, v => { f.played = v; draw(); }, 'Played'),
       select([['all', 'Any status'], ['RANKED', 'Ranked'], ['UNRANKED', 'Unranked'], ['LOCAL', 'Local']], f.status, v => { f.status = v; draw(); }, 'Status'),
-      select([['all', 'Any type'], ['jump', 'Jump'], ['stream', 'Stream'], ['tech', 'Tech'], ['varied', 'Varied'], ['quantum', 'Quantum']], f.kind, v => { f.kind = v; draw(); }, 'Type'),
+      select(KIND_PICKS, f.kind, v => { f.kind = v; draw(); }, 'Type'),
       tools(sortBox, perPagePick('perPage', draw), viewSwitch('library', draw))),
     h('div', { class: 'bar' }, count),
     picks.bar,
@@ -1292,16 +1296,24 @@ async function viewNearCatalog(root) {
   if (plays.length) load(); else fill(list, empty('Nothing new', 'You have every map the players near you play.'));
 }
 
+// Rhythia can't search by map type, and only Ranked and Qualified maps have one (vps.rs). With a type picked, Atlas
+// reads every page of the search once (Ranked: about 25 pages of 50, then kept 10 minutes by net.rs), keeps the
+// maps of that type and pages them itself; at most SCAN_PAGES pages.
+const TYPED_STATUSES = ['RANKED', 'QUALIFIED'];
+const SCAN_PAGES = 60;
+const RHYTHIA_AT_ONCE = 4; // as many as net.rs sends to Rhythia at once
+
 async function viewCatalog(root) {
   if (catalogMode === 'near') return viewNearCatalog(root);
   if (catalogMode === 'players') return viewPlayers(root);
-  const q = { page: 1, text: '', tags: catalogTags || '', status: '', minStars: null, maxStars: null };
+  const q = { page: 1, text: '', tags: catalogTags || '', status: '', minStars: null, maxStars: null, kind: 'all' };
   catalogTags = null;
   const info = h('span', { class: 'count' });
   const out = h('div');
   const sortBox = h('span');
   const getAll = button('Install missing', null);
-  let page = null, maps = [];
+  let maps = [];
+  let scan = null; // with a type: every map of the search ({ id, maps, capped })
   try { await getLibrary(); } catch { /* covers and "in game" need the library; the catalog works without */ }
   if (!SORTS.some(([k]) => k === prefs.sort.catalog.key)) prefs.sort.catalog = { ...SORT_OF.catalog };
 
@@ -1329,6 +1341,19 @@ async function viewCatalog(root) {
   const starsIn = (key, ph) => h('input', { class: 'field tiny', type: 'number', min: 0, max: 20, step: 0.5, placeholder: ph, 'aria-label': ph,
     onchange: e => { const v = e.target.value === '' ? null : Number(e.target.value); q[key] = Number.isFinite(v) ? v : null; q.page = 1; load(); } });
   const pager = h('div', { class: 'pager' });
+  // A type keeps the status at Ranked or Qualified; any other status clears the type.
+  const statusPick = select([['', 'Any status'], ['RANKED', 'Ranked'], ['QUALIFIED', 'Qualified'], ['UNRANKED', 'Unranked'], ['APPROVED', 'Legacy']], q.status, v => {
+    q.status = v;
+    if (!TYPED_STATUSES.includes(v)) kindPick.value = q.kind = 'all';
+    q.page = 1;
+    load();
+  }, 'Status');
+  const kindPick = select(KIND_PICKS, q.kind, v => {
+    q.kind = v;
+    if (v !== 'all' && !TYPED_STATUSES.includes(q.status)) statusPick.value = q.status = 'RANKED';
+    q.page = 1;
+    load();
+  }, 'Type');
 
   root.append(
     head('Catalog'),
@@ -1344,7 +1369,8 @@ async function viewCatalog(root) {
         h('input', { class: 'field grow', name: 'q', type: 'search', placeholder: 'Search maps' }),
         h('input', { class: 'field tags-in', name: 'tags', type: 'search', placeholder: 'Tags', 'aria-label': 'Tags', maxlength: 60, value: q.tags }),
         h('button', { class: 'btn ghost', type: 'submit' }, 'Search')),
-      select([['', 'Any status'], ['RANKED', 'Ranked'], ['QUALIFIED', 'Qualified'], ['UNRANKED', 'Unranked'], ['APPROVED', 'Legacy']], q.status, v => { q.status = v; q.page = 1; load(); }, 'Status'),
+      statusPick,
+      kindPick,
       h('span', { class: 'row' }, starsIn('minStars', 'Min ★'), starsIn('maxStars', 'Max ★')),
       tools(sortBox, perPagePick('perPageRhythia', () => { q.page = 1; load(); }), viewSwitch('catalog', draw))),
     h('div', { class: 'bar' }, info, acts(getAll)),
@@ -1361,29 +1387,63 @@ async function viewCatalog(root) {
     picks.draw();
   }
 
+  // One of Rhythia's pages of 50 for the search.
+  const ask = n => {
+    const { key, dir } = prefs.sort.catalog;
+    const { kind, ...search } = q;
+    return invoke('catalog', { query: { ...search, page: n, sort: key, ascending: dir === 'asc', status: q.status || null } });
+  };
+  // Atlas pages of `per` maps over Rhythia's pages of 50: one or two of them.
+  async function rhythiaPage(per) {
+    const start = (q.page - 1) * per;
+    const first = Math.floor(start / 50) + 1, last = Math.floor((start + per - 1) / 50) + 1;
+    const got = await Promise.all(first === last ? [ask(first)] : [ask(first), ask(last)]);
+    const skip = start - (first - 1) * 50;
+    return { total: got[0].total, maps: got.flatMap(p => p.maps).slice(skip, skip + per), info: `${num(got[0].total)} maps` };
+  }
+  async function typedPage(per, wait, stale) {
+    const { key, dir } = prefs.sort.catalog;
+    const id = JSON.stringify([q.text, q.tags, q.status, q.minStars, q.maxStars, key, dir]);
+    if (scan?.id !== id) {
+      const first = await ask(1);
+      const pages = Math.min(SCAN_PAGES, Math.ceil(first.total / 50));
+      const all = [...first.maps];
+      for (let n = 2; n <= pages; n += RHYTHIA_AT_ONCE) {
+        if (stale()) return null;
+        const part = await Promise.all(Array.from({ length: Math.min(RHYTHIA_AT_ONCE, pages - n + 1) }, (_, i) => ask(n + i)));
+        all.push(...part.flatMap(p => p.maps));
+        wait.set(n + part.length - 1, pages);
+      }
+      const ids = new Set(); // a map that moved between pages while they were read comes once
+      const found = all.filter(m => !ids.has(m.id) && ids.add(m.id));
+      await loadKinds(found.map(fromOnline));
+      scan = { id, maps: found, capped: first.total > pages * 50 };
+    }
+    const found = scan.maps.filter(m => kindIs(fromOnline(m), q.kind));
+    q.page = Math.min(q.page, Math.max(1, Math.ceil(found.length / per)));
+    const start = (q.page - 1) * per;
+    return { total: found.length, maps: found.slice(start, start + per),
+      info: `${num(found.length)} maps${scan.capped ? ` in the first ${num(SCAN_PAGES * 50)}` : ''}` };
+  }
+
   let loading = 0;
   async function load() {
     const ticket = ++loading;
     getAll.disabled = true;
     fill(sortBox, sortControls(SORTS, prefs.sort.catalog, setSort));
-    fill(out, loader());
+    const wait = loader();
+    fill(out, wait);
     fill(pager);
-    const { key, dir } = prefs.sort.catalog;
-    // Atlas pages of perPageRhythia maps over Rhythia's pages of 50: one or two of them.
-    const per = prefs.perPageRhythia, start = (q.page - 1) * per;
-    const first = Math.floor(start / 50) + 1, last = Math.floor((start + per - 1) / 50) + 1;
-    const ask1 = n => invoke('catalog', { query: { ...q, page: n, sort: key, ascending: dir === 'asc', status: q.status || null } });
+    const per = prefs.perPageRhythia;
     let got;
-    try { got = await Promise.all(first === last ? [ask1(first)] : [ask1(first), ask1(last)]); } catch (e) {
+    try { got = await (q.kind === 'all' ? rhythiaPage(per) : typedPage(per, wait, () => ticket !== loading)); } catch (e) {
       if (ticket === loading) fill(out, h('p', { class: 'err' }, String(e)));
       return;
     }
-    if (ticket !== loading) return;
-    page = { total: got[0].total, maps: got.flatMap(p => p.maps) };
-    const skip = start - (first - 1) * 50;
-    maps = page.maps.slice(skip, skip + per).map(fromOnline);
-    const pages = Math.max(1, Math.ceil(page.total / per));
-    info.textContent = `${num(page.total)} maps`;
+    if (!got || ticket !== loading) return;
+    maps = got.maps.map(fromOnline);
+    const pages = Math.max(1, Math.ceil(got.total / per));
+    info.textContent = got.info;
     const missing = maps.filter(m => !m.installed).length;
     getAll.disabled = missing === 0;
     getAll.textContent = missing ? `Install missing (${missing})` : 'All in game';
@@ -2694,7 +2754,9 @@ function toImprove(bests) {
       const at = b.at && new Date(b.at.replace(' ', 'T') + 'Z').getTime();
       if (isRanked(m) && at && now - at > 180 * DAY_MS) why.push('old');
     }
-    if (why.length) out.push({ ...m, why, check, bestMisses: b?.misses ?? null, bestSpeed: b?.speed ?? null });
+    // RP over your best at the best bet's speed, as the map's At which speed says it.
+    const gain = check?.bet?.rp ? Math.round(check.bet.rp[1] - (check.best ?? 0)) : null;
+    if (why.length) out.push({ ...m, why, check, gain: gain > 0 ? gain : null, bestMisses: b?.misses ?? null, bestSpeed: b?.speed ?? null });
   }
   return out.sort((a, b) => b.why.length - a.why.length || (b.stars ?? 0) - (a.stars ?? 0));
 }
@@ -2728,23 +2790,30 @@ async function viewGame(root) {
   const f = { why: 'all' };
   const improveBox = h('div');
   const cols = [
-    { label: 'Status', cell: m => statusChip(m.status) },
-    { label: 'Stars', cls: 'n', cell: m => stars(m.stars) },
-    { label: 'Best RP', cls: 'n', cell: m => rp(m.bestRp) },
-    { label: 'Accuracy', cls: 'n', cell: m => acc(m.bestAccuracy) },
-    { label: 'Misses', cls: 'n', cell: m => (m.bestMisses == null ? none() : num(m.bestMisses)) },
+    { label: 'Status', sort: 'status', cell: m => statusChip(m.status) },
+    { label: 'Stars', sort: 'stars', cls: 'n', cell: m => stars(m.stars) },
+    { label: 'Best RP', sort: 'bestRp', cls: 'n', cell: m => rp(m.bestRp) },
+    { label: 'Accuracy', sort: 'bestAccuracy', cls: 'n', cell: m => acc(m.bestAccuracy) },
+    { label: 'Misses', sort: 'bestMisses', cls: 'n', cell: m => (m.bestMisses == null ? none() : num(m.bestMisses)) },
     { label: 'Try at', cls: 'n', cell: m => betText(m.check) },
-    { label: 'Why', cls: 'why', cell: m => m.why.map(w => WHY[w]).join(' · ') },
+    { label: 'Gain', sort: 'gain', cls: 'n', cell: m => (m.gain == null ? none() : `+${num(m.gain)}`) },
+    { label: 'Why', sort: 'why', cls: 'why', cell: m => m.why.map(w => WHY[w]).join(' · ') },
   ];
+  const GAME_SORTS = [['why', 'Most reasons'], ['gain', 'RP gain'], ['stars', 'Stars'], ['bestRp', 'Best RP'], ['bestAccuracy', 'Accuracy'],
+    ['bestMisses', 'Misses'], ['lastPlayed', 'Last played'], ['title', 'Title']];
+  if (!GAME_SORTS.some(([k]) => k === prefs.sort.game.key)) prefs.sort.game = { ...SORT_OF.game };
+  const setSort = s => { prefs.sort.game = s; savePrefs(); drawImprove(); };
   function drawImprove() {
     const list = toImprove(pic.bests);
     const counts = Object.fromEntries(Object.keys(WHY).map(k => [k, list.filter(m => m.why.includes(k)).length]));
-    const shown = f.why === 'all' ? list : list.filter(m => m.why.includes(f.why));
+    const sort = prefs.sort.game;
+    const shown = sortMaps(f.why === 'all' ? list : list.filter(m => m.why.includes(f.why)), sort);
     fill(improveBox,
       h('div', { class: 'bar' },
         select([['all', `Any reason (${num(list.length)})`], ...Object.entries(WHY).filter(([k]) => counts[k]).map(([k, t]) => [k, `${t} (${num(counts[k])})`])], f.why, v => { f.why = v; drawImprove(); }, 'Why'),
-        tools(perPagePick('perPage', drawImprove))),
-      shown.length ? mapList({ mode: 'compact', maps: shown, cols, onOpen: openMap, perPage: prefs.perPage, page: 'game' }).el
+        tools(sortControls(GAME_SORTS, sort, setSort), perPagePick('perPage', drawImprove))),
+      shown.length ? mapList({ mode: 'compact', maps: shown, cols, onOpen: openMap, perPage: prefs.perPage, page: 'game',
+        sort, titleSort: 'title', onSort: key => setSort(nextSort(sort, key, SORT_OF.game)) }).el
         : empty('Nothing here', 'No maps for this reason.'));
   }
   const typesBox = h('div');

@@ -2474,16 +2474,19 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 let account = null; // { player, signedIn, expired, via, reimaginedWaiting, problem, checked }
 let onAccount = null;
 let signingIn = false; // the Rhythia window is open for a sign-in
+let signInStuck = false; // that window has shown no page for a while (account.rs, account-window-stuck)
 const loadAccount = () => invoke('account_status').then(a => { account = a; drawAccountRail(); onAccount?.(); }).catch(() => {});
 listen('account-changed', () => { loadAccount(); });
 // A sign-in can end on its own (Rhythia's lasts about an hour): read again now and then (local, no network).
 setInterval(loadAccount, 60_000);
-listen('account-window-closed', e => { signingIn = false; if (e.payload) toast(String(e.payload), true); onAccount?.(); });
+listen('account-window-closed', e => { signingIn = signInStuck = false; if (e.payload) toast(String(e.payload), true); onAccount?.(); });
+listen('account-window-stuck', () => { signInStuck = true; onAccount?.(); });
 listen('reimagined-no-session', () => toast('Open rhythia.com in your browser and sign in there, then try again.', true));
 loadAccount();
 // Rhythia's own website in a window of Atlas (account.rs); it closes by itself once signed in.
 function signInWindow() {
   signingIn = true;
+  signInStuck = false;
   onAccount?.();
   invoke('rhythia_sign_in');
 }
@@ -2535,6 +2538,8 @@ function accountPanel() {
     if (a.signedIn) signingIn = false;
     const ended = a.signedIn && (a.problem || rhythiaState().ended);
     const state = !account ? stateBox('Checking…', '', '')
+      : signingIn && signInStuck ? stateBox('The Rhythia window stays empty', 'bad', 'Rhythia\'s page did not load in it. Check that rhythia.com opens in your browser, then close the window and try again. You can also sign in with Reimagined.',
+        button('Show the window', signInWindow, 'btn mini'), viaReimagined)
       : signingIn ? stateBox('Waiting for you to sign in', '', 'Sign in in the Rhythia window, as on rhythia.com. It closes by itself once you are in.',
         button('Show the window', signInWindow, 'btn mini'))
       : a.reimaginedWaiting && !a.signedIn ? stateBox('Waiting for Reimagined', '', 'Allow it in your browser. Reimagined takes the sign-in of a rhythia.com tab where you are signed in.',

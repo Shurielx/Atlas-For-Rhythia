@@ -13,13 +13,14 @@
 //! signed in and which way (no token) is kept in `account.json`, so a restart or an update shows the player
 //! signed in while the token is renewed.
 
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::time::Duration;
 
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
+use tauri::webview::PageLoadEvent;
 use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 
 use crate::net::Net;
@@ -260,6 +261,34 @@ impl Account {
     }
 }
 
+/// The browser profile of the Rhythia and preview windows, in Atlas' local data folder next to the main
+/// window's own (EBWebView), never in the roaming one: Microsoft warns against WebView2 data on a network
+/// drive, which a roaming folder can be, and a player saw the Rhythia window stay empty while the main window
+/// worked. Versions up to 0.13.8 kept it in the roaming folder; it moves over once (the sign-in on the website
+/// moves with it), and what cannot move is deleted, since nothing reads it any more.
+fn web_profile(app: &AppHandle) -> Result<PathBuf, String> {
+    let local = app.path().app_local_data_dir().map_err(|e| e.to_string())?;
+    let profile = local.join("rhythia-web");
+    if let Ok(old) = app.path().app_data_dir().map(|d| d.join("rhythia-web")) {
+        if old.exists() && old != profile {
+            if !profile.exists() {
+                let _ = std::fs::create_dir_all(&local);
+                let _ = std::fs::rename(&old, &profile);
+            }
+            if old.exists() {
+                let _ = std::fs::remove_dir_all(&old);
+            }
+        }
+    }
+    Ok(profile)
+}
+
+/// Whether a page has finished loading in the Rhythia window since it opened.
+static PAGE_LOADED: AtomicBool = AtomicBool::new(false);
+/// How long the visible window may stay without a loaded page before Atlas loads it again, and then
+/// before it says so in Settings.
+const LOAD_SECS: u64 = 20;
+
 /// The Rhythia window: www.rhythia.com with its own browser profile and no access to Atlas (no
 /// capability names it). Only https pages open in it; the token comes on a navigation to
 /// `atlas-session.invalid`, which is cancelled before anything is sent.
@@ -271,19 +300,25 @@ pub fn open_window(app: &AppHandle, visible: bool) -> Result<(), String> {
         }
         return Ok(());
     }
-    let data = app.path().app_data_dir().map_err(|e| e.to_string())?.join("rhythia-web");
+    let data = web_profile(app)?;
     let state = app.state::<Atlas>();
     let tx = state.account_tx.clone();
     let mut builder = WebviewWindowBuilder::new(app, WINDOW, WebviewUrl::External(SITE.parse().expect("a fixed address")));
     if visible {
         builder = builder.initialization_script(OPEN_FORM);
     }
+    PAGE_LOADED.store(false, Ordering::SeqCst);
     builder
         .title("Sign in to Rhythia")
         .center()
         .inner_size(520.0, 760.0)
         .visible(visible)
         .data_directory(data)
+        .on_page_load(|_, page| {
+            if page.event() == PageLoadEvent::Finished {
+                PAGE_LOADED.store(true, Ordering::SeqCst);
+            }
+        })
         .on_navigation(move |url| {
             if url.host_str() == Some(CAPTURE_HOST) {
                 if let Some(token) = url.fragment().and_then(urlencoding_decode) {
@@ -315,7 +350,7 @@ pub fn open_preview(app: &AppHandle, id: i64) -> Result<(), String> {
         let _ = w.set_focus();
         return Ok(());
     }
-    let data = app.path().app_data_dir().map_err(|e| e.to_string())?.join("rhythia-web");
+    let data = web_profile(app)?;
     WebviewWindowBuilder::new(app, PREVIEW_WINDOW, WebviewUrl::External(url))
         .title("Map preview")
         .center()
@@ -379,6 +414,17 @@ pub async fn sign_in_with_window(app: AppHandle) {
         let _ = app.emit("account-window-closed", e);
         return;
     }
+    // A window that shows no page: loaded again once, then Settings says so (`account-window-stuck`).
+    let watch = app.clone();
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(Duration::from_secs(LOAD_SECS)).await;
+        let Some(w) = watch.get_webview_window(WINDOW).filter(|_| !PAGE_LOADED.load(Ordering::SeqCst)) else { return };
+        let _ = w.navigate(SITE.parse().expect("a fixed address"));
+        tokio::time::sleep(Duration::from_secs(LOAD_SECS)).await;
+        if !PAGE_LOADED.load(Ordering::SeqCst) && watch.get_webview_window(WINDOW).is_some() {
+            let _ = watch.emit("account-window-stuck", ());
+        }
+    });
     let state = app.state::<Atlas>();
     if wait_for_token(&app, &state.net, 600).await.is_ok() {
         close_window(&app);

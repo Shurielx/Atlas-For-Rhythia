@@ -485,7 +485,7 @@ fn collection_want_game(state: State<'_, Atlas>, id: u64, want: bool) -> Result<
 }
 
 /// Every 20 seconds: Atlas collections waiting for the game are written once Rhythia is closed
-/// (after a backup, like "Show in game"). The window hears `game-collection-written`. Copies of maps
+/// (after a backup, like "Copy to game"). The window hears `game-collection-written`. Copies of maps
 /// and replays that are due are made here too, also only while the game is closed (`backup-done`).
 async fn show_waiting(app: AppHandle) {
     let mut tick = tokio::time::interval(std::time::Duration::from_secs(20));

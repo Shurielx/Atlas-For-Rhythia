@@ -87,6 +87,8 @@ const ICONS = {
   grid: 'M1.5 1.5h5v5h-5zM9.5 1.5h5v5h-5zM1.5 9.5h5v5h-5zM9.5 9.5h5v5h-5z',
   compact: 'M1.5 3h13M1.5 6.3h13M1.5 9.6h13M1.5 12.9h13',
   done: 'M2.5 8.5l3.5 3.5 7.5-8',
+  added: 'M8 3v10M3 8h10',
+  changed: 'M2.5 5.5h10.5M10.5 3l2.5 2.5-2.5 2.5M13.5 10.5H3M5.5 8L3 10.5 5.5 13',
   failed: 'M3.5 3.5l9 9M12.5 3.5l-9 9',
   sent: 'M8 1.5a6.5 6.5 0 1 1 0 13a6.5 6.5 0 1 1 0-13zM8 4.5V8l2.5 1.5',
   waiting: 'M8 1.5a6.5 6.5 0 1 1 0 13a6.5 6.5 0 1 1 0-13z',
@@ -464,8 +466,8 @@ function installButton(m, small = true) {
 
 // cols: [{ label, cell(m), cls, sort }]; card(m) gives the lines under a grid cover. With onSort,
 // the headers of columns that have a sort key sort the list (titleSort: the Map column's key).
-// pick: { has(m), set(m, on) } adds a box to tick maps in the list and compact views: a click ticks one,
-// Shift+click a run from the last one, Ctrl+click on a row ticks it instead of opening it.
+// pick: { has(m), set(maps, on) } adds a box to tick maps in the list and compact views: a click ticks one,
+// Shift+click a run from the last one, Ctrl+click on a row ticks it instead of opening it, the header box the page.
 // perPage: maps on one page (0: all); page (the list's name) keeps its page while Atlas runs.
 const listPages = new Map(); // list name -> page shown
 function mapList({ mode, maps, cols, card, onOpen, perPage = 0, page: name, sort, onSort, titleSort, pick }) {
@@ -496,17 +498,21 @@ function mapList({ mode, maps, cols, card, onOpen, perPage = 0, page: name, sort
     } else {
       const withCover = mode === 'list';
       const rows = [], boxes = [];
-      // Ticks maps[from + i] (and with Shift the run from the last one) to on; the boxes follow.
-      const tick = (i, on, run) => {
-        const n = from + i;
-        const [a, b] = run && anchor != null ? [Math.min(anchor, n), Math.max(anchor, n)] : [n, n];
+      // Ticks maps[a..b] to on; the boxes follow.
+      const tickRun = (a, b, on) => {
+        pick.set(maps.slice(a, b + 1), on);
         for (let k = a; k <= b; k++) {
-          pick.set(maps[k], on);
           const j = k - from;
           if (boxes[j]) { boxes[j].checked = on; rows[j].classList.toggle('picked', on); }
         }
-        anchor = n;
         syncAll();
+      };
+      // Ticks maps[from + i] (and with Shift the run from the last one) to on.
+      const tick = (i, on, run) => {
+        const n = from + i;
+        if (run && anchor != null) tickRun(Math.min(anchor, n), Math.max(anchor, n), on);
+        else tickRun(n, n, on);
+        anchor = n;
       };
       const box = (m, i) => {
         const input = h('input', { type: 'checkbox', 'aria-label': 'Pick', checked: pick.has(m), tabindex: -1 });
@@ -519,7 +525,7 @@ function mapList({ mode, maps, cols, card, onOpen, perPage = 0, page: name, sort
             tick(i, input.checked, e.shiftKey);
           } }, input);
       };
-      const allBox = pick && h('input', { type: 'checkbox', 'aria-label': 'Pick all on this page', onchange: e => { for (let i = 0; i < part.length; i++) tick(i, e.target.checked, false); } });
+      const allBox = pick && h('input', { type: 'checkbox', 'aria-label': 'Pick all on this page', onchange: e => tickRun(from, from + part.length - 1, e.target.checked) });
       const syncAll = () => {
         if (!allBox) return;
         const n = part.filter(pick.has).length;
@@ -580,7 +586,7 @@ function picker(redraw, extra) {
   return {
     bar,
     draw,
-    pick: { has: m => picked.has(keyOf(m)), set: (m, on) => { if (on) picked.set(keyOf(m), m); else picked.delete(keyOf(m)); draw(); } },
+    pick: { has: m => picked.has(keyOf(m)), set: (maps, on) => { for (const m of maps) { if (on) picked.set(keyOf(m), m); else picked.delete(keyOf(m)); } draw(); } },
   };
 }
 
@@ -1045,7 +1051,7 @@ async function addToCollection(items) {
       const ids = items.map(i => i.onlineId).filter(Boolean);
       if (!ids.length) { toast('These maps are not on Rhythia.', true); return; }
       if (!await rhythiaReady()) return;
-      const r = await onRhythia(found.id, ids, true);
+      const r = await onRhythia(found.id, found.title, ids, true);
       toast(sentText(r, true, found.title) + (ids.length < items.length ? ` ${num(items.length - ids.length)} not on Rhythia.` : ''), r.failed > 0);
     }
   } catch (e) { toast(String(e), true); }
@@ -1089,9 +1095,10 @@ async function rhythiaReady() {
 }
 
 // Adds maps to one of the player's Rhythia collections, or removes them, with the count in a toast meanwhile.
-async function onRhythia(id, ids, add) {
-  toast(add ? 'Adding on Rhythia…' : 'Removing on Rhythia…');
-  const off = await listen('collection-progress', e => toast(`${add ? 'Adding' : 'Removing'} on Rhythia… ${num(e.payload.done)} of ${num(e.payload.of)}`));
+async function onRhythia(id, title, ids, add) {
+  const doing = add ? `Adding to “${title}” on Rhythia…` : `Removing from “${title}” on Rhythia…`;
+  toast(doing);
+  const off = await listen('collection-progress', e => toast(`${doing} ${num(e.payload.done)} of ${num(e.payload.of)}`));
   try { return await invoke('rhythia_collection_maps', { id, maps: ids, add }); } finally { off(); }
 }
 // "Added 12 to “MegaPack”. 3 already there. 2 not added (Rhythia: Can't find beatmap page)."
@@ -1103,22 +1110,22 @@ function sentText(r, add, title) {
 }
 
 // A new collection on the player's Rhythia profile with these maps (those that are on Rhythia).
-async function saveToRhythia(title, maps) {
+async function copyToRhythia(title, maps) {
   if (!await rhythiaReady()) return;
-  const ids = maps.map(m => m.onlineId).filter(Boolean);
-  const name = await ask('Save to Rhythia', `${plural(ids.length, 'map')} go to a new collection on your profile.`, 'Save', { value: title });
+  const ids = maps.map(m => m.onlineId).filter(Boolean).slice(0, 1000);
+  const name = await ask('Copy to rhythia.com', `${plural(ids.length, 'map')} go to a new collection on your rhythia.com profile.`, 'Copy', { value: title });
   if (!name) return;
-  toast('Saving to Rhythia…');
+  toast('Copying to rhythia.com…');
   try {
     const id = await invoke('rhythia_collection_create', { title: name });
-    const r = ids.length ? await onRhythia(id, ids.slice(0, 1000), true) : { added: 0, already: 0, failed: 0 };
-    toast(`Saved to Rhythia with ${plural(r.added, 'map')}.` + (r.failed ? ` ${num(r.failed)} not added${r.reason ? ` (${r.reason})` : ''}.` : ''), r.failed > 0);
+    const r = ids.length ? await onRhythia(id, name, ids, true) : { added: 0, already: 0, failed: 0 };
+    toast(`“${name}” is on rhythia.com with ${plural(r.added, 'map')}.` + (r.failed ? ` ${num(r.failed)} not added${r.reason ? ` (${r.reason})` : ''}.` : ''), r.failed > 0);
   } catch (e) { toast(String(e), true); }
 }
 
-// "Save to Rhythia", there even while none of the maps is on Rhythia (then off).
-function saveButton(title, maps) {
-  const b = button('Save to Rhythia', () => saveToRhythia(title, maps), 'btn ghost');
+// "Copy to rhythia.com", there even while none of the maps is on Rhythia (then off).
+function copyButton(title, maps) {
+  const b = button('Copy to rhythia.com', () => copyToRhythia(title, maps), 'btn ghost');
   b.disabled = !maps.some(m => m.onlineId);
   return b;
 }
@@ -1560,6 +1567,8 @@ async function viewCollections(root) {
   root.append(h('div', { class: 'bar' },
     seg([['atlas', 'Atlas'], ['mine', 'My Rhythia'], ['rhythia', 'Rhythia'], ['game', 'In game']], collectionsTab, v => { collectionsTab = v; draw(); }, 'Where')), out);
   const pick = (source, id) => { openCollection = { source, id }; show('collections'); };
+  // Create with an empty name: says so (like Atlas and Rhythia would) and puts the cursor in the field.
+  const noName = form => { toast('Give the collection a name.', true); form.elements.name.focus(); };
   try { await getLibrary(); } catch { /* covers, types and "in your game" need the library */ }
 
   // Cards for the collections' maps known here (Atlas, game): filled at once.
@@ -1579,7 +1588,7 @@ async function viewCollections(root) {
     const add = h('form', { class: 'bar', onsubmit: async e => {
       e.preventDefault();
       const name = e.target.elements.name.value.trim();
-      if (!name) return;
+      if (!name) { noName(e.target); return; }
       try { const c = await invoke('collection_create', { name, maps: [] }); pick('atlas', c.id); } catch (err) { toast(String(err), true); }
     } }, h('input', { class: 'field grow', name: 'name', placeholder: 'New collection name', maxlength: 80 }), h('button', { class: 'btn', type: 'submit' }, 'Create'),
       tools(viewSwitch('collections', draw)));
@@ -1612,7 +1621,7 @@ async function viewCollections(root) {
     const add = h('form', { class: 'bar', onsubmit: async e => {
       e.preventDefault();
       const title = e.target.elements.name.value.trim();
-      if (!title) return;
+      if (!title) { noName(e.target); return; }
       if (!await rhythiaReady()) return;
       try { const id = await invoke('rhythia_collection_create', { title }); toast(`Made “${title}” on Rhythia.`); pick('rhythia', id); } catch (err) { toast(String(err), true); }
     } }, h('input', { class: 'field grow', name: 'name', placeholder: 'New collection on Rhythia', maxlength: 60 }), h('button', { class: 'btn', type: 'submit' }, 'Create'),
@@ -1771,8 +1780,8 @@ function collCard({ title, sub, desc, count, stars, chips, onOpen }) {
     for (const m of maps) { const k = kindOf(m); if (!k) continue; typed++; counts[k.kind]++; if (k.quantum) q++; }
     fill(types, ...(typed ? [
       h('div', { class: 'mix' }, Object.entries(counts).filter(([, n]) => n).map(([k, n]) => h('span', { class: 'mix-' + k, style: `flex:${n}`, title: `${KIND_NAME[k]} ${n}` }))),
-      h('div', { class: 'legend' }, Object.entries(counts).filter(([, n]) => n).map(([k, n]) => h('span', {}, h('i', { class: 'mix-' + k }), `${KIND_NAME[k]} ${pct(n, typed)}%`)),
-        q > 0 && h('span', {}, `Quantum ${pct(q, typed)}%`),
+      h('div', { class: 'legend' }, Object.entries(counts).filter(([, n]) => n).map(([k, n]) => h('span', { class: 'l-' + k }, `${KIND_NAME[k]} ${pct(n, typed)}%`)),
+        q > 0 && h('span', { class: 'l-quantum' }, `Quantum ${pct(q, typed)}%`),
         h('span', { class: 'dim', title: 'Types are known for Ranked maps' }, `of ${num(typed)} with a type`)),
     ] : []));
     const inGame = maps.filter(m => m.installed).length;
@@ -1822,8 +1831,8 @@ function breakdown(maps) {
       h('div', { class: 'bd-label' }, h('span', {}, 'Types'), h('b', {}, known ? `${num(known)} of ${num(n)} known` : maps.some(isRanked) ? 'Loading…' : 'Only Ranked maps have types')),
       mix,
       h('div', { class: 'legend' },
-        Object.entries(counts).map(([k, c]) => h('span', {}, h('i', { class: 'mix-' + k }), `${KIND_NAME[k]} ${num(c)}${known ? ` · ${pct(c, known)}%` : ''}`)),
-        h('span', {}, chip('Quantum', 'k-quantum'), ` ${num(quantum)}`))),
+        Object.entries(counts).map(([k, c]) => h('span', { class: 'l-' + k }, `${KIND_NAME[k]} ${num(c)}${known ? ` · ${pct(c, known)}%` : ''}`)),
+        h('span', { class: 'l-quantum' }, `Quantum ${num(quantum)}${known ? ` · ${pct(quantum, known)}%` : ''}`))),
     starList.length > 0 && h('div', { class: 'bd-row' }, h('div', { class: 'bd-label' }, h('span', {}, 'Stars'),
       h('b', {}, `${Math.min(...starList).toFixed(2)} to ${Math.max(...starList).toFixed(2)} · average ${(starList.reduce((a, b) => a + b, 0) / starList.length).toFixed(2)}`))));
 }
@@ -1872,7 +1881,7 @@ async function collectionDetail(root, which) {
         button('Save to Atlas', async () => {
           try { const made = await invoke('collection_create', { name: title, maps: maps.map(itemOf) }); toast(`Saved as “${made.name}”.`); } catch (e) { toast(String(e), true); }
         }, 'btn ghost'),
-        !own && saveButton(title, maps),
+        !own && copyButton(title, maps),
         button('Open on rhythia.com', () => invoke('open_on_rhythia', { kind: 'collection', id: c.id }), 'btn ghost'),
       ];
     } else if (which.source === 'game') {
@@ -1893,9 +1902,9 @@ async function collectionDetail(root, which) {
       maps = atlas.maps.map(fromItem);
       actions = [
         maps.some(m => !m.installed && m.onlineId) && button('Download as collection', () => asCollection(atlas), 'btn ghost'),
-        saveButton(title, maps),
-        button(atlas.gameId ? 'Update in game' : 'Show in game', async () => {
-          const ok = await ask(atlas.gameId ? 'Update it in the game?' : 'Show it in the game?',
+        copyButton(title, maps),
+        button(atlas.gameId ? 'Update in game' : 'Copy to game', async () => {
+          const ok = await ask(atlas.gameId ? 'Update it in the game?' : 'Copy it to the game’s collections?',
             'Close Rhythia first. Maps you don’t have are left out.', 'Go');
           if (!ok) return;
           try {
@@ -1963,7 +1972,7 @@ async function collectionDetail(root, which) {
     if (!await ask(`Remove ${plural(ids.length, 'map')} from “${title}”?`, '', 'Remove', 'danger')) return;
     if (!await rhythiaReady()) return;
     try {
-      const r = await onRhythia(own.id, ids, false);
+      const r = await onRhythia(own.id, title, ids, false);
       toast(sentText(r, false, title), r.failed > 0);
       show('collections');
     } catch (e) { toast(String(e), true); }
@@ -2112,7 +2121,7 @@ async function viewSettings(root) {
   let info = await invoke('app_info');
   const box = h('div', { class: 'sets' });
   root.append(head('Settings'),
-    h('div', { class: 'bar' }, seg([['look', 'Look'], ['game', 'Game'], ['account', 'Account'], ['data', 'Data'], ['about', 'About']],
+    h('div', { class: 'bar' }, seg([['look', 'Look'], ['game', 'Game'], ['account', 'Account'], ['data', 'Data'], ['about', 'About'], ['changelog', 'Changelog']],
       settingsTab, v => { settingsTab = v; draw(); }, 'Settings')),
     box);
   const set = (label, ...right) => h('div', { class: 'set' }, h('span', {}, label), h('span', { class: 'set-r' }, ...right));
@@ -2205,7 +2214,8 @@ async function viewSettings(root) {
 
   function draw() {
     onBridge = null;
-    fill(box, ...({ look, game, account: () => [accountPanel(), bridgePanel()], data, about })[settingsTab]());
+    box.className = settingsTab === 'changelog' ? '' : 'sets'; // the changelog is wider, with its own column of versions
+    fill(box, ...({ look, game, account: () => [accountPanel(), bridgePanel()], data, about, changelog: () => [changelogView()] })[settingsTab]());
   }
   draw();
 }
@@ -2372,9 +2382,10 @@ listen('backup-done', e => {
 // Shown after the version number while Atlas is an early release.
 const STAGE = 'alpha';
 
-// TERMS_TEXT start (made by npm run terms from TERMS.md and PRIVACY.md; do not edit here)
+// TERMS_TEXT start (made by npm run terms from TERMS.md, PRIVACY.md and CHANGELOG.md; do not edit here)
 const TERMS_VERSION = "November 22, 2026";
 const TERMS_TEXT = [ [ "h1", "Terms of use" ], [ "p", "Atlas is a free app by Shuriel for managing your Rhythia maps, scores and collections. It is not made by the Rhythia team. Contact: contact@shuriel.com." ], [ "h2", "Using Atlas" ], [ "p", "Your account follows Rhythia's rules. Atlas never touches the game program or your login file. It changes the game's files only when you ask, with the game closed." ], [ "p", "What you download, delete or change with Atlas is up to you. Keep your own backups." ], [ "h2", "Limits" ], [ "p", "Atlas downloads at most 3000 maps a day and sends at most 10 requests a second to Rhythia. Song previews of maps you don't have are limited to 300 a day." ], [ "p", "Atlas is open source (GPL-3.0). If you run a changed copy, for example one without these limits, it is at your own risk and you get no help; Rhythia or Shuriel's server can block your account or address. Shuriel's server and the Atlas name and logo are only for the official Atlas." ], [ "h2", "Signing in" ], [ "p", "Signing in is optional. Atlas never asks for or keeps your password." ], [ "h2", "No warranty" ], [ "p", "Atlas is an alpha: an early version with rough edges. It comes as it is. It can have bugs and wrong data, and features can change or stop. Shuriel is not liable for any damage or loss from using Atlas, such as lost data or actions Rhythia takes on your account, as far as the law allows." ], [ "h1", "Privacy" ], [ "p", "Atlas has no ads, no tracking and no accounts of its own. Nothing about you is sold or shared. Questions: contact@shuriel.com." ], [ "h2", "On your computer" ], [ "p", "Your library, collections, copies and settings stay on your computer. If you sign in to Rhythia, the sign-in is kept in the Windows password store." ], [ "h2", "What goes out" ], [ "ul", [ "**Rhythia:** maps, collections and your sign-in, as on the website.", "**Shuriel's server:** once a day, a random key and the version of the map types list. For Played near your rank, Near your rank and Your types, your public Rhythia player number; it answers with totals of players ranked near you, never their names. For At which speed and For you, the same number and the Rhythia number, stars and notes of the maps on screen; it answers from your public Rhythia top scores. It sees your IP address to keep its limits and block misuse; its logs keep only part of it.", "**GitHub:** once an hour, whether a new version is out." ] ], [ "p", "Reimagined and Atlas talk only on your computer." ], [ "h2", "Removing it" ], [ "p", "In Settings → Data, press Uninstall Atlas and leave **Also delete my Atlas data** ticked: Atlas, its data and your Rhythia sign-in are removed. From Windows Settings → Apps, tick **Delete the application data** for the same." ] ];
+const CHANGELOG = [ { "version": "0.13.10", "title": "Changelog", "date": "2026-11-27", "sections": [ { "cat": "added", "items": [ { "title": "Changelog", "body": "Settings has a Changelog with every version since the first public one." } ] }, { "cat": "changed", "items": [ { "title": "Names", "body": "\"Save to Rhythia\" is now \"Copy to rhythia.com\", and \"Show in game\" is now \"Copy to game\"." }, { "title": "Picking maps", "body": "The box at the top of a list ticks the whole page at once." }, { "title": "Rhythia collections", "body": "Adding maps or removing them names the collection while it works." }, { "title": "Types", "body": "The type legend under collections lines up, and Quantum has its own mark." } ] }, { "cat": "fixed", "items": [ { "title": "Create", "body": "Create with no name now tells you to give the collection one." } ] } ] }, { "version": "0.13.9", "title": "Sign-in window", "date": "2026-11-26", "sections": [ { "cat": "fixed", "items": [ { "title": "Sign-in window", "body": "The Rhythia sign-in window no longer stays empty for some players." }, { "title": "Still empty", "body": "Atlas loads it again, and Settings → Account offers Sign in with Reimagined." } ] } ] }, { "version": "0.13.8", "title": "Try at", "date": "2026-11-23", "sections": [ { "cat": "changed", "items": [ { "title": "Try at", "body": "Counts all your tries of a map in the game, not only your passes, so it suggests speeds you are likely to pass." } ] } ] }, { "version": "0.13.7", "title": "RP gain", "date": "2026-11-23", "sections": [ { "cat": "changed", "items": [ { "title": "Worth another go", "body": "Gain shows how much your Rhythia RP would grow, not the map's RP." } ] }, { "cat": "fixed", "items": [ { "title": "Worth another go", "body": "The table fits smaller windows." } ] } ] }, { "version": "0.13.6", "title": "Map types", "date": "2026-11-23", "sections": [ { "cat": "added", "items": [ { "title": "Type filter", "body": "Catalog → All maps and Library can show only one type: Jump, Stream, Tech, Varied or Quantum." }, { "title": "Worth another go", "body": "Can be sorted, and has a Gain column." } ] } ] }, { "version": "0.13.5", "title": "First public alpha", "date": "2026-11-23", "sections": [ { "cat": "added", "items": [ { "title": "Atlas", "body": "The first public alpha." }, { "title": "Uninstall", "body": "Settings → Data can uninstall Atlas, with or without your Atlas data." } ] }, { "cat": "changed", "items": [ { "title": "Account", "body": "Settings → Account shows plainly whether you are signed in to Rhythia and whether Reimagined is connected." } ] } ] } ];
 // TERMS_TEXT end
 
 // Terms and privacy: the text of TERMS.md and PRIVACY.md (tools/terms.mjs). **bold** shows as bold.
@@ -2384,6 +2395,38 @@ function termsText() {
     TERMS_TEXT.map(([tag, body]) => tag === 'ul' ? h('ul', {}, body.map(li => h('li', {}, rich(li))))
       : tag === 'h1' ? h('h2', { class: 'terms-part' }, body)
       : h(tag, {}, tag === 'p' ? rich(body) : body)));
+}
+
+// Settings → Changelog (CHANGELOG from CHANGELOG.md, tools/terms.mjs): the versions in a column of their own and
+// one version beside it, its changes under Added, Changed and Fixed.
+const CHANGE_CATS = { added: ['Added', 'added'], changed: ['Changed', 'changed'], fixed: ['Fixed', 'done'] };
+let changelogAt = 0; // the version shown, kept while Atlas runs
+function changelogView() {
+  const nav = h('nav', { class: 'cl-vers', 'aria-label': 'Versions' });
+  const body = h('div', { class: 'cl-body' });
+  const day = (d, month) => (d ? new Date(`${d}T12:00:00Z`).toLocaleDateString('en-GB', { day: 'numeric', month, year: 'numeric', timeZone: 'UTC' }) : 'Not out yet');
+  const name = v => (v.version === 'Next' ? 'Next version' : v.version);
+  const step = (i, dir) => (CHANGELOG[i]
+    ? h('button', { type: 'button', class: 'cl-step ' + dir, onclick: () => showVersion(i) },
+      h('small', {}, dir === 'older' ? 'Older' : 'Newer'), h('b', {}, `${name(CHANGELOG[i])} · ${CHANGELOG[i].title}`))
+    : h('span'));
+  function showVersion(i) {
+    changelogAt = i;
+    const v = CHANGELOG[i];
+    [...nav.querySelectorAll('.cl-v')].forEach((b, k) => { b.classList.toggle('on', k === i); b.setAttribute('aria-current', String(k === i)); });
+    fill(body, h('article', { class: 'cl-rel' },
+      h('header', {},
+        h('h2', {}, name(v), ' ', h('span', { class: 'cl-t' }, v.title)),
+        h('p', { class: 'dim small' }, [day(v.date, 'long'), ...v.sections.map(s => `${num(s.items.length)} ${s.cat}`)].join(' · '))),
+      v.sections.map(s => h('section', { class: 'cl-sec cl-' + s.cat },
+        h('h3', {}, icon(CHANGE_CATS[s.cat][1]), CHANGE_CATS[s.cat][0], h('small', {}, num(s.items.length))),
+        h('ul', {}, s.items.map(it => h('li', {}, h('b', {}, it.title), h('span', {}, it.body)))))),
+      h('footer', {}, step(i + 1, 'older'), step(i - 1, 'newer'))));
+  }
+  fill(nav, h('span', { class: 'cl-gt' }, 'Versions'), CHANGELOG.map((v, i) =>
+    h('button', { type: 'button', class: 'cl-v', onclick: () => showVersion(i) }, h('b', {}, name(v)), h('small', {}, `${v.title} · ${day(v.date, 'short')}`))));
+  showVersion(Math.min(changelogAt, CHANGELOG.length - 1));
+  return h('div', { class: 'cl' }, nav, body);
 }
 
 function viewTerms(root) {

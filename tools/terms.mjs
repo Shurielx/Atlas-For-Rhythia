@@ -1,6 +1,8 @@
-// npm run terms: puts TERMS.md and PRIVACY.md into the app's Terms page (src/app.js, between the
-// TERMS_TEXT markers), so the app shows exactly the text of the files. Run it after changing either file.
-// Kept: ## headings, paragraphs, "- " list items, **bold**; links show their text (a mailto link its address).
+// npm run terms: puts TERMS.md and PRIVACY.md into the app's Terms page and CHANGELOG.md into Settings →
+// Changelog (src/app.js, between the TERMS_TEXT markers), so the app shows exactly the text of the files.
+// Run it after changing any of them.
+// Terms and privacy keep: ## headings, paragraphs, "- " list items, **bold**; links show their text (a mailto
+// link its address). The changelog is read as versions (its own note says how it is written).
 import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
@@ -29,13 +31,42 @@ function inline(text) {
 
 const version = read('TERMS.md').match(/Version of ([^.]+)\./)?.[1] || '';
 const text = [...blocks(read('TERMS.md'), 'Terms of use'), ...blocks(read('PRIVACY.md'), 'Privacy')];
+
+// CHANGELOG.md: [{ version, title, date, sections: [{ cat: 'added'|'changed'|'fixed', items: [{ title, body }] }] }],
+// newest first. A mistake in the file stops the script rather than showing a broken changelog.
+function versions(md) {
+  const out = [];
+  let section = null;
+  for (const [n, raw] of md.split('\n').entries()) {
+    const line = raw.trim();
+    const fail = why => { throw new Error(`CHANGELOG.md line ${n + 1}: ${why}`); };
+    if (line.startsWith('## ')) {
+      const [version, title, date = ''] = line.slice(3).split(' · ').map(x => x.trim());
+      if (!version || !title || (version !== 'Next' && !/^\d{4}-\d{2}-\d{2}$/.test(date))) fail('expected "## version · title · YYYY-MM-DD"');
+      out.push({ version, title, date, sections: [] });
+      section = null;
+    } else if (line.startsWith('### ')) {
+      const cat = line.slice(4).toLowerCase();
+      if (!['added', 'changed', 'fixed'].includes(cat) || !out.length) fail('expected ### Added, Changed or Fixed under a version');
+      section = { cat, items: [] };
+      out.at(-1).sections.push(section);
+    } else if (line.startsWith('- ')) {
+      const m = line.slice(2).match(/^([^:]+):\s+(.+)$/);
+      if (!m || !section) fail('expected "- Title: what changed" under a ### section');
+      section.items.push({ title: inline(m[1].trim()), body: inline(m[2].trim()) });
+    }
+  }
+  return out;
+}
+const changes = versions(read('CHANGELOG.md'));
 const file = root + 'src/app.js';
 const app = readFileSync(file, 'utf8');
 const nl = app.includes('\r\n') ? '\r\n' : '\n';
-const start = '// TERMS_TEXT start (made by npm run terms from TERMS.md and PRIVACY.md; do not edit here)';
+const start = '// TERMS_TEXT start (made by npm run terms from TERMS.md, PRIVACY.md and CHANGELOG.md; do not edit here)';
 const end = '// TERMS_TEXT end';
-const a = app.indexOf(start), b = app.indexOf(end);
+const a = app.indexOf('// TERMS_TEXT start'), b = app.indexOf(end);
 if (a < 0 || b < a) throw new Error('TERMS_TEXT markers not found in src/app.js');
-const block = [start, `const TERMS_VERSION = ${JSON.stringify(version)};`, `const TERMS_TEXT = ${JSON.stringify(text, null, 1).replace(/\n\s*/g, ' ')};`, ''].join(nl);
+const one = list => JSON.stringify(list, null, 1).replace(/\n\s*/g, ' ');
+const block = [start, `const TERMS_VERSION = ${JSON.stringify(version)};`, `const TERMS_TEXT = ${one(text)};`, `const CHANGELOG = ${one(changes)};`, ''].join(nl);
 writeFileSync(file, app.slice(0, a) + block + app.slice(b));
-console.log(`Terms page updated (${text.length} blocks, version of ${version}).`);
+console.log(`Terms page updated (${text.length} blocks, version of ${version}); changelog ${changes.length} versions.`);

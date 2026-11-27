@@ -222,9 +222,12 @@ th.n .th-btn{flex-direction:row-reverse}
 .mix{display:flex;height:6px;gap:2px;background:var(--line)}
 .mix span{min-width:2px}
 .mix-jump{background:var(--jump)}.mix-stream{background:var(--stream)}.mix-tech{background:var(--tech)}.mix-varied{background:var(--varied)}.mix-none{background:var(--line)}
-.legend{display:flex;flex-wrap:wrap;gap:.3rem 1rem;font-size:.8rem;color:var(--dim)}
-.legend span{display:inline-flex;align-items:center;gap:.35rem}
-.legend i{display:inline-block;width:8px;height:8px}
+.legend{display:flex;flex-wrap:wrap;gap:.4rem 1.2rem;margin-top:.5rem;color:var(--dim);font-size:.82rem}
+.legend span{display:inline-flex;align-items:center;gap:.4rem}
+/* A square of the colour (--c) before each named entry; Quantum, a trait over the types and not in the bar, an empty one. */
+.legend [class^="l-"]::before{content:"";width:.6rem;height:.6rem;background:var(--c)}
+.l-try{--c:var(--line)}.l-pass{--c:var(--accent)}.l-jump{--c:var(--jump)}.l-stream{--c:var(--stream)}.l-tech{--c:var(--tech)}.l-varied{--c:var(--varied)}
+.legend .l-quantum::before{background:none;box-shadow:inset 0 0 0 1px var(--fg)}
 
 /* collection cards: grid, list or compact */
 .ccards.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:1.6rem 1.2rem}
@@ -373,14 +376,10 @@ input[type=checkbox]:disabled{opacity:.35;cursor:default}
 .chart-labels{position:relative;height:1.2rem;margin-top:.2rem;color:var(--faint);font-size:.75rem}
 .chart-labels span{position:absolute;top:0;white-space:nowrap}
 th.why,td.why{text-align:left;color:var(--dim);font-size:.85rem}
-.legend{display:flex;flex-wrap:wrap;gap:.4rem 1.2rem;margin-top:.5rem;color:var(--dim);font-size:.82rem}
-.legend span::before{content:"";display:inline-block;width:.6rem;height:.6rem;margin-right:.4rem;background:var(--c)}
-.l-try{--c:var(--line)}.l-pass{--c:var(--accent)}.l-jump{--c:var(--jump)}.l-stream{--c:var(--stream)}.l-tech{--c:var(--tech)}.l-varied{--c:var(--varied)}
 .type-row{display:grid;grid-template-columns:4.5rem minmax(0,1fr) auto;align-items:center;gap:.8rem;margin:.3rem 0}
 .game-grid{display:grid;grid-template-columns:minmax(0,1fr);gap:0 3rem}
 @media (min-width:1100px){.game-grid{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}}
 .game-grid .tbl table td:first-child:not(.n):not(.c-map),.game-grid .tbl table th:first-child:not(.n):not(.c-map){text-align:left}
-.key::before{content:"";display:inline-block;width:.6rem;height:.6rem;margin-right:.5rem;background:var(--c)}
 td.why{white-space:normal;min-width:11rem}
 .type-bar{display:flex;height:.8rem;background:var(--blank)}
 .type-bar i{display:block}
@@ -458,3 +457,35 @@ html.boot body{visibility:hidden}
 .players tr.click:hover td{background:var(--hover)}
 .players tr.best td{background:rgba(var(--tint),.08)}
 .pager .row{gap:.4rem}
+
+/* Settings → Changelog: the versions in a column of their own, one version beside it */
+.cl{display:grid;grid-template-columns:15rem minmax(0,1fr);gap:2rem;align-items:start;max-width:62rem}
+.cl-vers{position:sticky;top:0;display:flex;flex-direction:column;gap:2px}
+.cl-gt{margin:0 0 .4rem .7rem;font-size:.72rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--faint)}
+.cl-v{display:block;padding:.55rem .7rem;text-align:left;background:none;border:0;color:var(--dim);cursor:pointer;transition:background .15s,color .15s}
+.cl-v:hover{background:var(--hover);color:var(--fg)}
+.cl-v.on{background:var(--blank);color:var(--fg)}
+.cl-v b{display:block;font-size:.92rem;font-weight:700}
+.cl-v small{display:block;margin-top:1px;font-size:.78rem;color:var(--faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cl-rel header h2{margin:0;font-size:1.4rem;font-weight:800}
+.cl-t{font-weight:600;color:var(--dim)}
+.cl-rel header p{margin:.25rem 0 1.4rem}
+.cl-sec{--cc:var(--faint)}
+.cl-sec+.cl-sec{margin-top:1.6rem}
+.cl-added{--cc:var(--jump)}.cl-changed{--cc:var(--accent)}.cl-fixed{--cc:var(--ok)}
+.cl-sec h3{display:flex;align-items:center;gap:.5rem;margin:0 0 .2rem;font-size:.95rem;font-weight:750}
+.cl-sec h3 .ic{color:var(--cc)}
+.cl-sec h3 small{font-size:.75rem;font-weight:600;color:var(--faint)}
+.cl-sec ul{margin:0;padding:0;list-style:none}
+.cl-sec li{position:relative;padding:.8rem 0 .8rem 1.1rem;border-top:1px solid var(--line)}
+.cl-sec li:first-child{border-top:0}
+.cl-sec li::before{content:"";position:absolute;left:1px;top:1.25rem;width:6px;height:6px;background:var(--cc)}
+.cl-sec li b{display:block;font-weight:700;color:var(--fg)}
+.cl-sec li span{display:block;margin-top:.15rem;color:var(--dim);line-height:1.55}
+.cl-rel footer{display:flex;justify-content:space-between;gap:.8rem;margin-top:1.6rem;padding-top:1rem;border-top:1px solid var(--line)}
+.cl-step{display:flex;flex-direction:column;min-width:0;padding:.4rem .7rem;background:none;border:0;text-align:left;cursor:pointer;transition:background .15s}
+.cl-step:hover{background:var(--hover)}
+.cl-step.newer{align-items:flex-end;text-align:right}
+.cl-step small{font-size:.75rem;color:var(--faint)}
+.cl-step b{font-size:.88rem}
+@media (max-width:900px){.cl{grid-template-columns:minmax(0,1fr);gap:1rem}.cl-vers{position:static;flex-direction:row;overflow-x:auto}.cl-gt{display:none}.cl-v{flex:none}}

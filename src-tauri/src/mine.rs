@@ -128,8 +128,8 @@ impl Mine {
         })
     }
 
-    /// Adds maps it does not have yet; returns how many were added.
-    /// Adds maps; a collection shown in the game is written there again once Rhythia is closed.
+    /// Adds maps it does not have yet; returns how many were added. A collection shown in the game
+    /// is written there again once Rhythia is closed.
     pub fn add(&self, id: u64, maps: Vec<Item>) -> Result<usize, String> {
         self.change(|list| {
             let c = find(list, id)?;
